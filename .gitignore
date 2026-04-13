@@ -1,0 +1,18 @@
+# Dipendenze PHP
+vendor/
+composer.phar
+
+# Ambiente Portabile Autonomo (Pesante)
+php_portable/
+
+# File di output generati dall'applicazione
+data/compilazioni_docenti.xlsx
+data/compilazioni_*.xlsx
+
+# Configurazione OS e Editor
+.vscode/
+.idea/
+*.suo
+*.sln
+.DS_Store
+Thumbs.db
