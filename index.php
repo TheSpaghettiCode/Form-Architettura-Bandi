@@ -7,13 +7,7 @@ if (file_exists(__DIR__ . '/vendor/autoload.php')) {
 // Inizializzazione variabili per il Frontend
 $corsi = [];
 $compilazioniPrecedenti = [];
-$tariffe = [
-    'Supporto contratti' => 0,
-    'Supporto studenti' => 0,
-    'Conferenze' => 0,
-    'Tutorato studenti' => 0,
-    'Tutorato dottorandi' => 0
-];
+$tariffe = [];
 
 // FASE 1: LETTURA DATI
 try {
@@ -69,36 +63,38 @@ try {
             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($fileTariffe);
             $sheet = $spreadsheet->getActiveSheet();
             
-            // La struttura orizzontale prevede gli handler alla riga 1 e i costi alla riga 2
-            $headerRow = $sheet->getRowIterator(1, 1)->current();
-            $costRow = $sheet->getRowIterator(2, 2)->current();
-            
-            if ($headerRow && $costRow) {
-                foreach ($headerRow->getCellIterator() as $cell) {
-                    $val = strtolower(trim((string)$cell->getValue()));
-                    $col = $cell->getColumn();
-                    
-                    // Cerchiamo la tariffa corrispondente nella colonna
-                    $costoStr = (string)$sheet->getCell($col . '2')->getCalculatedValue();
+            // Struttura verticale: Nome(A), Costo(B), Con spesa(C)
+            $highestRow = $sheet->getHighestDataRow();
+            for ($row = 2; $row <= $highestRow; $row++) {
+                $nome = trim((string)$sheet->getCell('A' . $row)->getValue());
+                $costoStr = (string)$sheet->getCell('B' . $row)->getCalculatedValue();
+                $conSpesaStr = trim((string)$sheet->getCell('C' . $row)->getCalculatedValue());
+                
+                if (!empty($nome)) {
                     $costo = (float)filter_var($costoStr, FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION);
-                    
-                    foreach ($tariffe as $key => $defaultVal) {
-                        if (stripos($val, $key) !== false || stripos($key, $val) !== false) {
-                            $tariffe[$key] = $costo;
-                            break;
-                        }
-                    }
+                    $conSpesa = ($conSpesaStr === '1' || strtolower($conSpesaStr) === 'true' || strtolower($conSpesaStr) === 'si');
+                    $tariffe[$nome] = [
+                        'costo' => $costo,
+                        'con_spesa' => $conSpesa
+                    ];
                 }
             }
         }
+
         // 3. Leggi compilazioni pre-esistenti per permettere l'update
         $fileCompilazioni = __DIR__ . '/data/compilazioni_docenti.xlsx';
         if (file_exists($fileCompilazioni)) {
             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($fileCompilazioni);
             $sheet = $spreadsheet->getActiveSheet();
             $highestRow = $sheet->getHighestDataRow();
+            $highestCol = $sheet->getHighestDataColumn();
+            $highestColIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($highestCol);
             
-            $attivitaKeys = ['ore_contratti', 'ore_studenti', 'ore_conferenze', 'ore_tut_studenti', 'ore_tut_dottorandi'];
+            $headers = [];
+            for ($col = 1; $col <= $highestColIndex; $col++) {
+                $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+                $headers[$colLetter] = trim((string)$sheet->getCell($colLetter . '1')->getValue());
+            }
             
             for ($row = 2; $row <= $highestRow; $row++) {
                 $corsoStr = (string)$sheet->getCell('D' . $row)->getValue();
@@ -106,21 +102,31 @@ try {
                     $compData = [
                         'nome' => (string)$sheet->getCell('B' . $row)->getValue(),
                         'cognome' => (string)$sheet->getCell('C' . $row)->getValue(),
-                        'motivazioni' => (string)$sheet->getCell('H' . $row)->getValue()
+                        'competenze' => (string)$sheet->getCell('H' . $row)->getValue(),
+                        'note' => (string)$sheet->getCell('I' . $row)->getValue()
                     ];
                     
-                    $colIndex = 9;
-                    foreach ($attivitaKeys as $ak) {
-                        $attiva = (string)$sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $row)->getValue();
-                        $studenti = (string)$sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $row)->getValue();
-                        $ore = (string)$sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $row)->getValue();
-                        $colloquio = (string)$sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $row)->getValue();
+                    foreach ($tariffe as $nomeAttivita => $dati) {
+                        $inputName = strtolower(str_replace(' ', '_', $nomeAttivita));
+                        $colAttiva = array_search("$nomeAttivita - Attiva", $headers);
+                        $colColloquio = array_search("$nomeAttivita - Colloquio", $headers);
+                        $colDettagli = array_search("$nomeAttivita - Dettagli", $headers);
                         
-                        // Per retrocompatibilità col nostro JS, estraiamo chiavi piatte
-                        $compData["{$ak}_attiva"] = (strtoupper($attiva) === 'SI');
-                        $compData["{$ak}_studenti"] = (int)$studenti;
-                        $compData[$ak] = (float)$ore;
-                        $compData["{$ak}_colloquio"] = (strtoupper($colloquio) === 'SI');
+                        if ($colAttiva !== false && $colDettagli !== false) {
+                            $attiva = (string)$sheet->getCell($colAttiva . $row)->getValue();
+                            $colloquio = $colColloquio !== false ? (string)$sheet->getCell($colColloquio . $row)->getValue() : 'NO';
+                            $dettagliJson = (string)$sheet->getCell($colDettagli . $row)->getValue();
+                            
+                            $compData["{$inputName}_attiva"] = (strtoupper($attiva) === 'SI');
+                            $compData["{$inputName}_colloquio"] = (strtoupper($colloquio) === 'SI');
+                            
+                            $sottovoci = json_decode($dettagliJson, true);
+                            if (is_array($sottovoci)) {
+                                $compData["{$inputName}_sottovoci"] = $sottovoci;
+                            } else {
+                                $compData["{$inputName}_sottovoci"] = [];
+                            }
+                        }
                     }
                     
                     $compilazioniPrecedenti[$corsoStr] = $compData;
@@ -141,14 +147,16 @@ if (empty($corsi)) {
     ];
 }
 $allTariffeZero = true;
-foreach ($tariffe as $val) if ($val > 0) $allTariffeZero = false;
-if ($allTariffeZero) {
+foreach ($tariffe as $val) {
+    if (isset($val['costo']) && $val['costo'] > 0) $allTariffeZero = false;
+}
+if (empty($tariffe) || $allTariffeZero) {
     $tariffe = [
-        'Supporto contratti' => 25.50,
-        'Supporto studenti' => 20.00,
-        'Conferenze' => 50.00,
-        'Tutorato studenti' => 18.00,
-        'Tutorato dottorandi' => 22.00
+        'Supporto contratti' => ['costo' => 32.00, 'con_spesa' => true],
+        'Supporto studenti' => ['costo' => 20.00, 'con_spesa' => true],
+        'Conferenze' => ['costo' => 0, 'con_spesa' => false],
+        'Tutorato studenti' => ['costo' => 18.00, 'con_spesa' => true],
+        'Tutorato dottorandi' => ['costo' => 22.00, 'con_spesa' => true]
     ];
 }
 ?>
@@ -205,20 +213,38 @@ if ($allTariffeZero) {
             </div>
 
             <div class="form-group">
-                <label>Voci di Spesa</label>
+                <label>Attività costo fisso</label>
                 <div class="table-responsive">
-                    <table class="modern-table" id="activitiesGrid">
+                    <table class="modern-table" id="activitiesGridNoPrice">
                         <thead>
                             <tr>
-                                <th>Voce</th>
-                                <th>Attiva</th>
-                                <th>Studenti</th>
-                                <th>Ore</th>
-                                <th>Colloquio</th>
-                                <th style="text-align: right;">Costo Calcolato</th>
+                                <th style="width: 25%">Voce</th>
+                                <th style="width: 10%">Attiva</th>
+                                <th style="width: 50%">Dettagli (Costo)</th>
+                                <th style="text-align: right; width: 15%">Somma Costi</th>
                             </tr>
                         </thead>
-                        <tbody id="activitiesTableBody">
+                        <tbody id="activitiesTableBodyNoPrice">
+                            <!-- Dinamicamente popolato dal JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 2rem;">
+                <label>Attività costo orario</label>
+                <div class="table-responsive">
+                    <table class="modern-table" id="activitiesGridPrice">
+                        <thead>
+                            <tr>
+                                <th style="width: 25%">Voce</th>
+                                <th style="width: 10%">Attiva</th>
+                                <th style="width: 15%">Colloquio</th>
+                                <th style="width: 35%">Dettagli (Persone , Ore)</th>
+                                <th style="text-align: right; width: 15%">Somma Costi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="activitiesTableBodyPrice">
                             <!-- Dinamicamente popolato dal JS -->
                         </tbody>
                     </table>
@@ -235,9 +261,14 @@ if ($allTariffeZero) {
                 ⚠️ Attenzione! Il costo totale supera il budget previsto per questo corso. Non è possibile inviare la richiesta.
             </div>
 
-            <div class="form-group">
-                <label for="motivazioni">Motivazioni della richiesta</label>
-                <textarea id="motivazioni" name="motivazioni" placeholder="Descrivi brevemente i motivi della ripartizione..."></textarea>
+            <div class="form-group" style="margin-top: 2rem;">
+                <label for="competenze">Competenze/requisiti richiesti</label>
+                <textarea id="competenze" name="competenze" required placeholder="Descrivi brevemente un profilo di competenze e/o requisiti richiesti per il bando"></textarea>
+            </div>
+
+            <div class="form-group" style="margin-top: 2rem;">
+                <label for="note">Note<small> (opzionale)</small></label>
+                <textarea id="note" name="note" placeholder="Descrivi qui ulteriori dettagli relativi alla ripartizione dei supporti"></textarea>
             </div>
 
             <button type="submit" id="submitBtn" class="btn-submit" disabled>
@@ -265,6 +296,6 @@ if ($allTariffeZero) {
         const tariffeData = <?php echo json_encode($tariffe, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         const compilazioniPrecedentiData = <?php echo json_encode($compilazioniPrecedenti, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     </script>
-    <script src="js/script.js"></script>
+    <script src="js/script.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

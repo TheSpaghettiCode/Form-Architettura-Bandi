@@ -8,7 +8,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// Includi autoloader di Composer se esiste, altrimenti potremmo avere un errore critico
 if (!file_exists(dirname(__DIR__) . '/vendor/autoload.php')) {
     echo json_encode(['success' => false, 'message' => 'Libreria PhpSpreadsheet non trovata. Esegui composer install.']);
     exit;
@@ -25,7 +24,6 @@ function sanitize($input) {
     return htmlspecialchars(strip_tags(trim($input)), ENT_QUOTES, 'UTF-8');
 }
 
-// Supporto per payload x-www-form-urlencoded o raw JSON
 $postData = $_POST;
 if (empty($postData)) {
     $raw = file_get_contents('php://input');
@@ -42,17 +40,47 @@ $corso = sanitize($postData['corso'] ?? '');
 $docente = sanitize($postData['docente'] ?? '');
 $budget_iniziale = (float)($postData['budget_iniziale'] ?? 0);
 $costo_totale = (float)($postData['costo_totale'] ?? 0);
-$motivazioni = sanitize($postData['motivazioni'] ?? '');
+$competenze = sanitize($postData['competenze'] ?? '');
+$note = sanitize($postData['note'] ?? '');
 
-// Estrazione campi attività
-$attivitaKeys = ['ore_contratti', 'ore_studenti', 'ore_conferenze', 'ore_tut_studenti', 'ore_tut_dottorandi'];
+// Estrazione campi attività dinamici da Budget_Architettura.xlsx
+$fileTariffe = dirname(__DIR__) . '/data/Budget_Architettura.xlsx';
+$titoliAttivita = [];
+if (file_exists($fileTariffe)) {
+    $spreadsheetBudget = IOFactory::load($fileTariffe);
+    $sheetBudget = $spreadsheetBudget->getActiveSheet();
+    $highestRowBudget = $sheetBudget->getHighestDataRow();
+    for ($row = 2; $row <= $highestRowBudget; $row++) {
+        $nomeAtt = trim((string)$sheetBudget->getCell('A' . $row)->getValue());
+        if (!empty($nomeAtt)) {
+            $titoliAttivita[] = $nomeAtt;
+        }
+    }
+}
+
+// Fallback nel caso in cui il file non esista
+if (empty($titoliAttivita)) {
+    $titoliAttivita = [
+        'Supporto contratti', 'Supporto studenti', 'Conferenze', 
+        'Tutorato studenti', 'Tutorato dottorandi'
+    ];
+}
+
 $datiAttivita = [];
-foreach ($attivitaKeys as $ak) {
-    $datiAttivita[$ak] = [
-        'attiva' => isset($postData["{$ak}_attiva"]) ? 1 : 0,
-        'studenti' => (int)($postData["{$ak}_studenti"] ?? 0),
-        'ore' => (float)($postData[$ak] ?? 0),
-        'colloquio' => isset($postData["{$ak}_colloquio"]) ? 1 : 0
+foreach ($titoliAttivita as $titolo) {
+    $inputName = strtolower(str_replace(' ', '_', $titolo));
+    $dettagliRaw = $postData["{$inputName}_dettagli"] ?? '[]';
+    
+    // Validazione base per assicurarsi che sia JSON
+    json_decode($dettagliRaw);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        $dettagliRaw = '[]';
+    }
+
+    $datiAttivita[$titolo] = [
+        'attiva' => isset($postData["{$inputName}_attiva"]) ? 1 : 0,
+        'colloquio' => isset($postData["{$inputName}_colloquio"]) ? 1 : 0,
+        'dettagli_json' => $dettagliRaw
     ];
 }
 
@@ -79,23 +107,17 @@ try {
         
         $headers = [
             'Data/Ora', 'Nome Compilatore', 'Cognome Compilatore', 'Corso Selezionato',
-            'Docente di Riferimento', 'Budget Iniziale (€)', 'Costo Totale (€)', 'Motivazioni'
-        ];
-        
-        $titoliAttivita = [
-            'Supporto contratti', 'Supporto studenti', 'Conferenze', 
-            'Tutorato studenti', 'Tutorato dottorandi'
+            'Docente di Riferimento', 'Budget Iniziale (€)', 'Prezzo Totale (€)', 'Competenze/Requisiti', 'Note'
         ];
         
         foreach ($titoliAttivita as $titolo) {
             $headers[] = "$titolo - Attiva";
-            $headers[] = "$titolo - Studenti";
-            $headers[] = "$titolo - Ore";
             $headers[] = "$titolo - Colloquio";
+            $headers[] = "$titolo - Dettagli";
         }
         
         $colIndex = 1;
-        $sheet->freezePane('E2'); // Blocca top riga e prime 4 colonne (Anagrafica) per scroll agevole
+        $sheet->freezePane('E2');
         
         $colorPalette = [
             'FFD9E1F2', // Blue pallido
@@ -104,7 +126,6 @@ try {
             'FFFCE4D6', // Arancio pastello
             'FFE6B8B7'  // Rosso pallido
         ];
-        $paletteIdx = 0;
 
         foreach ($headers as $index => $header) {
             $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex);
@@ -115,15 +136,15 @@ try {
             $sheet->getColumnDimension($colLetter)->setAutoSize(true);
             
             // Colori Header
-            if ($index < 8) {
-                // Primi 8 campi generici: Sfondo Blu Scuro, Testo Bianco
+            if ($index < 9) {
+                // Primi 9 campi generici
                 $sheet->getStyle($colLetter . '1')->getFill()
                     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
                     ->getStartColor()->setARGB('FF1F4E78');
                 $sheet->getStyle($colLetter . '1')->getFont()->getColor()->setARGB('FFFFFFFF');
             } else {
-                // Raggruppamenti da 4 per Attività -> Colore a rotazione
-                $group = floor(($index - 8) / 4);
+                // Raggruppamenti da 3 per Attività -> Colore a rotazione
+                $group = floor(($index - 9) / 3);
                 $bgColor = $colorPalette[$group % count($colorPalette)];
                 $sheet->getStyle($colLetter . '1')->getFill()
                     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
@@ -154,16 +175,15 @@ try {
     $sheet->setCellValue("E$newRow", $docente);
     $sheet->setCellValue("F$newRow", $budget_iniziale);
     $sheet->setCellValue("G$newRow", $costo_totale);
-    $sheet->setCellValue("H$newRow", $motivazioni);
+    $sheet->setCellValue("H$newRow", $competenze);
+    $sheet->setCellValue("I$newRow", $note);
 
-    // Scrittura Dati Attività (Inizia da colonna 'I' che è la numero 9)
-    // Scrittura Dati Attività (Inizia da colonna 'I' che è la numero 9)
-    $colIndex = 9;
-    foreach ($attivitaKeys as $ak) {
-        $sheet->setCellValue(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$ak]['attiva'] ? 'SI' : 'NO');
-        $sheet->setCellValue(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$ak]['studenti']);
-        $sheet->setCellValue(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$ak]['ore']);
-        $sheet->setCellValue(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$ak]['colloquio'] ? 'SI' : 'NO');
+    // Scrittura Dati Attività (Inizia da colonna 'J' che è la numero 10)
+    $colIndex = 10;
+    foreach ($titoliAttivita as $titolo) {
+        $sheet->setCellValue(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$titolo]['attiva'] ? 'SI' : 'NO');
+        $sheet->setCellValue(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$titolo]['colloquio'] ? 'SI' : 'NO');
+        $sheet->setCellValueExplicit(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIndex++) . $newRow, $datiAttivita[$titolo]['dettagli_json'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
     }
 
     $writer = new Xlsx($spreadsheet);
