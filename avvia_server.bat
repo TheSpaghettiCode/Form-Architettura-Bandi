@@ -1,2 +1,2 @@
 @echo off
-"php_portable\php.exe" -S localhost:8000
+"A:\GITHUB Projects\Form-Architettura-Bandi\php_portable\php.exe" -S localhost:8000

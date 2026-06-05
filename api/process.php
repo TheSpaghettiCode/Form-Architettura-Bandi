@@ -66,6 +66,14 @@ if (empty($titoliAttivita)) {
     ];
 }
 
+$minLimiti = [
+    'supporto_contratti' => ['minOre' => 9],
+    'supporto_studenti' => ['minOre' => 30],
+    'tutorato_studenti' => ['minOre' => 14],
+    'tutorato_dottorandi' => ['minOre' => 10],
+    'conferenze' => ['minCosto' => 100, 'maxCosto' => 600]
+];
+
 $datiAttivita = [];
 foreach ($titoliAttivita as $titolo) {
     $inputName = strtolower(str_replace(' ', '_', $titolo));
@@ -77,8 +85,35 @@ foreach ($titoliAttivita as $titolo) {
         $dettagliRaw = '[]';
     }
 
+    $attiva = isset($postData["{$inputName}_attiva"]) ? 1 : 0;
+    
+    // Validazione dei limiti lato server
+    if ($attiva) {
+        $details = json_decode($dettagliRaw, true);
+        if (is_array($details)) {
+            foreach ($details as $idx => $item) {
+                if ($inputName === 'conferenze') {
+                    $costo = (float)($item['costo'] ?? 0);
+                    if ($costo < 100 || $costo > 600) {
+                        echo json_encode(['success' => false, 'message' => "Il costo della Persona #" . ($idx + 1) . " per l'attività 'Conferenze' deve essere compreso tra 100€ e 600€."]);
+                        exit;
+                    }
+                } else {
+                    if (isset($minLimiti[$inputName])) {
+                        $minOre = $minLimiti[$inputName]['minOre'];
+                        $ore = (float)($item['ore'] ?? 0);
+                        if ($ore < $minOre) {
+                            echo json_encode(['success' => false, 'message' => "Le ore per la Persona #" . ($idx + 1) . " dell'attività '$titolo' non possono essere inferiori al minimo di $minOre ore."]);
+                            exit;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     $datiAttivita[$titolo] = [
-        'attiva' => isset($postData["{$inputName}_attiva"]) ? 1 : 0,
+        'attiva' => $attiva,
         'colloquio' => isset($postData["{$inputName}_colloquio"]) ? 1 : 0,
         'dettagli_json' => $dettagliRaw
     ];

@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const inputCostoTotale = document.getElementById('costo_totale');
 
     const budgetAlert = document.getElementById('budgetAlert');
+    const validationAlert = document.getElementById('validationAlert');
     const submitBtn = document.getElementById('submitBtn');
     const form = document.getElementById('budgetForm');
 
@@ -29,6 +30,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. Chiavi Dinamiche per Dettagli JSON
     let keysNoPrice = ['costo'];
     let keysPrice = ['studenti', 'ore'];
+
+    const minLimiti = {
+        'supporto_contratti': { minOre: 9 },
+        'supporto_studenti': { minOre: 30 },
+        'tutorato_studenti': { minOre: 14 },
+        'tutorato_dottorandi': { minOre: 10 },
+        'conferenze': { minCosto: 100, maxCosto: 600 }
+    };
 
     document.querySelectorAll('#activitiesGridNoPrice th').forEach(th => {
         if (th.textContent.includes('Dettagli')) {
@@ -65,7 +74,18 @@ document.addEventListener('DOMContentLoaded', () => {
         row.setAttribute('data-is-price', isPrice ? '1' : '0');
         row.setAttribute('data-tariffa', tariffa);
 
-        let infoCosto = isPrice ? `<br><small>(${tariffa}€/h)</small>` : '';
+        let infoCosto = '';
+        if (isPrice) {
+            infoCosto = `<br><small>(${tariffa}€/h`;
+            if (minLimiti[inputName] && minLimiti[inputName].minOre) {
+                infoCosto += `, <span style="color: #000000; font-weight: 600;">min ${minLimiti[inputName].minOre}h/Pers.</span>`;
+            }
+            infoCosto += `)</small>`;
+        } else {
+            if (inputName === 'conferenze') {
+                infoCosto = `<br><small style="color: #000000; font-size: 0.75rem;">(min=100€, max=600€)</small>`;
+            }
+        }
 
         let colloquioCol = isPrice ? `
             <td>
@@ -102,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isActive = this.checked;
             if (checkboxColloquio) checkboxColloquio.disabled = !isActive;
             btnAdd.disabled = !isActive;
-            
+
             if (!isActive) {
                 if (checkboxColloquio) checkboxColloquio.checked = false;
                 container.innerHTML = ''; // Rimuovi tutte le sottovoci
@@ -119,6 +139,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
+    function updateLabels(container) {
+        const labels = container.querySelectorAll('.sv-index-label');
+        labels.forEach((label, idx) => {
+            label.textContent = `Pers.#${idx + 1}`;
+        });
+    }
+
     function addSubvoce(inputName, isPrice, container, initStudenti = '', initValore = '') {
         const subRow = document.createElement('div');
         subRow.className = 'subvoce-row';
@@ -128,12 +155,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const placeholderValore = isPrice ? 'Ore' : 'Costo Fisso €';
 
+        let labelHtml = !isPrice ? `
+            <span class="sv-index-label" style="width: 25%; font-size: 0.85rem; font-weight: bold; align-self: center; color: var(--text-muted);">Pers.#</span>
+        ` : '';
+
         let studentiInput = isPrice ? `
             <input type="number" class="sv-studenti" placeholder="N. Pers." min="1" step="1" value="${initStudenti}" required style="width: 40%; padding: 4px;">
         ` : '';
-        let widthValore = isPrice ? '40%' : '80%';
+        let widthValore = isPrice ? '40%' : '55%';
 
         subRow.innerHTML = `
+            ${labelHtml}
             ${studentiInput}
             <input type="number" class="sv-valore" placeholder="${placeholderValore}" min="0" step="0.5" value="${initValore}" required style="width: ${widthValore}; padding: 4px;">
             <button type="button" class="btn-remove-subvoce" style="width: 15%; color: red; cursor: pointer; padding: 4px;">X</button>
@@ -141,9 +173,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         container.appendChild(subRow);
 
+        if (!isPrice) {
+            updateLabels(container);
+        }
+
         const btnRemove = subRow.querySelector('.btn-remove-subvoce');
         btnRemove.addEventListener('click', () => {
             subRow.remove();
+            if (!isPrice) {
+                updateLabels(container);
+            }
             calculateTotal();
         });
 
@@ -175,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('note').value = '';
         document.querySelectorAll('.attiva-checkbox, .colloquio-checkbox').forEach(chk => {
             chk.checked = false;
-            if(chk.classList.contains('colloquio-checkbox')) chk.disabled = true;
+            if (chk.classList.contains('colloquio-checkbox')) chk.disabled = true;
         });
         document.querySelectorAll('.btn-add-subvoce').forEach(btn => btn.disabled = true);
         document.querySelectorAll('.subvoci-container').forEach(c => c.innerHTML = '');
@@ -183,28 +222,28 @@ document.addEventListener('DOMContentLoaded', () => {
         // Controllo se è già stata compilata questa materia
         if (typeof compilazioniPrecedentiData !== 'undefined' && compilazioniPrecedentiData[selectedCorso.corso]) {
             const oldValue = compilazioniPrecedentiData[selectedCorso.corso];
-            
+
             document.getElementById('competenze').value = oldValue.competenze || '';
             document.getElementById('note').value = oldValue.note || '';
 
             Object.keys(tariffeData).forEach(attivitaName => {
                 const inputName = attivitaName.replace(/\s+/g, '_').toLowerCase();
                 const isPrice = tariffeData[attivitaName].con_spesa;
-                
+
                 if (oldValue[`${inputName}_attiva`]) {
                     const checkAttiva = document.querySelector(`input[name="${inputName}_attiva"]`);
                     const checkColloquio = document.querySelector(`input[name="${inputName}_colloquio"]`);
                     const container = document.getElementById(`container_${inputName}`);
                     const btnAdd = document.getElementById(`btnAdd_${inputName}`);
-                    
-                    if(checkAttiva) {
+
+                    if (checkAttiva) {
                         checkAttiva.checked = true;
-                        if(checkColloquio) {
+                        if (checkColloquio) {
                             checkColloquio.disabled = false;
                             checkColloquio.checked = oldValue[`${inputName}_colloquio`] === true;
                         }
-                        if(btnAdd) btnAdd.disabled = false;
-                        
+                        if (btnAdd) btnAdd.disabled = false;
+
                         const sottovoci = oldValue[`${inputName}_sottovoci`];
                         if (sottovoci && Array.isArray(sottovoci)) {
                             sottovoci.forEach(sv => {
@@ -231,8 +270,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Validazione globale extra
     ['input', 'change', 'keyup'].forEach(evt => {
         form.addEventListener(evt, (e) => {
-            if(!e.target.classList.contains('sv-studenti') && !e.target.classList.contains('sv-valore')) {
-               calculateTotal();
+            if (!e.target.classList.contains('sv-studenti') && !e.target.classList.contains('sv-valore')) {
+                calculateTotal();
             }
         });
     });
@@ -241,9 +280,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let totalCostAll = 0; // Tutto influenza il budget
         let hasActiveRows = false;
         let allActiveFilled = true;
+        let hasValidationErrors = false;
 
         const allRows = document.querySelectorAll('tr[data-attivita]');
-        
+
         allRows.forEach(row => {
             const isActive = row.querySelector('.attiva-checkbox').checked;
             const isPrice = row.getAttribute('data-is-price') === '1';
@@ -259,7 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isActive) {
                 hasActiveRows = true;
                 const subRows = container.querySelectorAll('.subvoce-row');
-                
+
                 if (subRows.length === 0) {
                     allActiveFilled = false;
                 }
@@ -276,6 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         if (studStr === '' || stud <= 0 || valStr === '' || val <= 0) {
                             allActiveFilled = false;
+                            inputVal.classList.remove('input-error');
                         } else {
                             let rowSubCost = stud * val * tariffa;
                             let detailObj = {};
@@ -283,23 +324,45 @@ document.addEventListener('DOMContentLoaded', () => {
                             detailObj[keysPrice[1] || 'ore'] = val;
                             dettagliArr.push(detailObj);
                             rowSum += rowSubCost;
+
+                            // Validazione minimo ore per persona
+                            const limit = minLimiti[inputName];
+                            if (limit && limit.minOre && val < limit.minOre) {
+                                inputVal.classList.add('input-error');
+                                hasValidationErrors = true;
+                            } else {
+                                inputVal.classList.remove('input-error');
+                            }
                         }
                     } else {
                         if (valStr === '' || val <= 0) {
                             allActiveFilled = false;
+                            inputVal.classList.remove('input-error');
                         } else {
                             let rowSubCost = val; // Qui il valore inserito è già il costo fisso
                             let detailObj = {};
                             detailObj[keysNoPrice[0] || 'costo'] = val;
                             dettagliArr.push(detailObj);
                             rowSum += rowSubCost;
+
+                            // Validazione min/max costo per persona
+                            const limit = minLimiti[inputName];
+                            if (limit && limit.minCosto && (val < limit.minCosto || val > limit.maxCosto)) {
+                                inputVal.classList.add('input-error');
+                                hasValidationErrors = true;
+                            } else {
+                                inputVal.classList.remove('input-error');
+                            }
                         }
                     }
                 });
 
                 totalCostAll += rowSum;
+            } else {
+                // Rimuovi errori se la riga non è attiva
+                container.querySelectorAll('.input-error').forEach(inp => inp.classList.remove('input-error'));
             }
-            
+
             // Aggiorna Costo singola riga
             rowCostCol.textContent = formatCurrency(rowSum);
             // Aggiorna hidden input con JSON per il backend
@@ -313,10 +376,10 @@ document.addEventListener('DOMContentLoaded', () => {
         inputCostoTotale.value = totalCostAll;
 
         // Validatore Budget CRUCIALE
-        validateBudget(totalCostAll, isActivityValid);
+        validateBudget(totalCostAll, isActivityValid, hasValidationErrors);
     }
 
-    function validateBudget(totalCost, isActivityValid) {
+    function validateBudget(totalCost, isActivityValid, hasValidationErrors) {
         if (!corsoSelect.value) {
             submitBtn.disabled = true;
             return;
@@ -332,17 +395,22 @@ document.addEventListener('DOMContentLoaded', () => {
             totalValueDisplay.classList.remove('budget-ok');
             totalValueDisplay.classList.add('budget-error');
             budgetAlert.classList.add('visible');
-            submitBtn.disabled = true;
         } else {
             totalValueDisplay.classList.remove('budget-error');
             totalValueDisplay.classList.add('budget-ok');
             budgetAlert.classList.remove('visible');
+        }
 
-            if (isTextValid && isFormValid && isActivityValid) {
-                submitBtn.disabled = false;
-            } else {
-                submitBtn.disabled = true;
-            }
+        if (hasValidationErrors) {
+            validationAlert.classList.add('visible');
+        } else {
+            validationAlert.classList.remove('visible');
+        }
+
+        if (totalCost <= currentBudget && !hasValidationErrors && isTextValid && isFormValid && isActivityValid) {
+            submitBtn.disabled = false;
+        } else {
+            submitBtn.disabled = true;
         }
     }
 

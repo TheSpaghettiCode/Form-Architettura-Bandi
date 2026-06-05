@@ -261,6 +261,10 @@ if (empty($tariffe) || $allTariffeZero) {
                 ⚠️ Attenzione! Il costo totale supera il budget previsto per questo corso. Non è possibile inviare la richiesta.
             </div>
 
+            <div id="validationAlert" class="alert-message" style="color: #991b1b; background: #fef2f2; border: 1px solid #f87171;">
+                ⚠️ Attenzione! Rispettare i limiti minimi/massimi indicati per le ore o i costi.
+            </div>
+
             <div class="form-group" style="margin-top: 2rem;">
                 <label for="competenze">Competenze/requisiti richiesti</label>
                 <textarea id="competenze" name="competenze" required placeholder="Descrivi brevemente un profilo di competenze e/o requisiti richiesti per il bando"></textarea>
